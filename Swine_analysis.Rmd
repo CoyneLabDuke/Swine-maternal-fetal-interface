@@ -1,0 +1,1206 @@
+---
+title: "Visium"
+output: html_document
+date: "2023-11-07"
+---
+
+```{r}
+
+# install.packages("ComplexHeatmap")
+library(devtools)
+library(SeuratObject)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(harmony)
+library(viridisLite)
+# if (!require("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# 
+# BiocManager::install("BiocNeighbors")
+# devtools::install_github("jokergoo/ComplexHeatmap")
+# devtools::install_github("immunogenomics/presto")
+# BiocManager::install("Biobase")
+# devtools::install_github("jinworks/CellChat")
+library(CellChat)
+install.packages("NMF")
+# devtools::install_github("jokergoo/circlize")
+library(SeuratWrappers)
+# remotes::install_github('satijalab/seurat-wrappers@community-vignette')
+library(dittoSeq)
+# BiocManager::install("dittoSeq")
+library(scCustomize)
+
+```
+
+```{r}
+#SPATIAL ANALYSIS OF THE PORCINE PLACENTA/MFI
+MFI017 <- Load10X_Spatial(data.dir ="/Users/crm110/Desktop/Data/MFI017/outs", filename = "filtered_feature_bc_matrix.h5", slice = "MFI017")
+MFI025 <- Load10X_Spatial(data.dir ="/Users/crm110/Desktop/Data/MFI025/outs", filename = "filtered_feature_bc_matrix.h5", slice = "MFI025")
+MFI031 <- Load10X_Spatial(data.dir ="/Users/crm110/Desktop/Data/MFI031/outs", filename = "filtered_feature_bc_matrix.h5", slice = "MFI031")
+MFI094 <- Load10X_Spatial(data.dir ="/Users/crm110/Desktop/Data/MFI094/outs", filename = "filtered_feature_bc_matrix.h5", slice = "MFI094")
+
+MFI017$MFI <- "MFI017"
+MFI025$MFI <- "MFI025"
+MFI031$MFI <- "MFI031"
+MFI094$MFI <- "MFI094"
+
+MFI017$SEX <- "Male"
+MFI025$SEX <- "Female"
+MFI031$SEX <- "Female"
+MFI094$SEX <- "Male"
+
+MFI017[["percent.mt"]] <- PercentageFeatureSet(MFI017, pattern = "^MT-")
+MFI017[["percent.rb"]] <- PercentageFeatureSet(MFI017, pattern = "^RP[SL]")
+MFI025[["percent.mt"]] <- PercentageFeatureSet(MFI025, pattern = "^MT-")
+MFI025[["percent.rb"]] <- PercentageFeatureSet(MFI025, pattern = "^RP[SL]")
+MFI031[["percent.mt"]] <- PercentageFeatureSet(MFI031, pattern = "^MT-")
+MFI031[["percent.rb"]] <- PercentageFeatureSet(MFI031, pattern = "^RP[SL]")
+MFI094[["percent.mt"]] <- PercentageFeatureSet(MFI094, pattern = "^MT-")
+MFI094[["percent.rb"]] <- PercentageFeatureSet(MFI094, pattern = "^RP[SL]")
+
+VlnPlot(
+    object = MFI017,
+    features = c("nCount_Spatial", "nFeature_Spatial",  "percent.rb"),
+    ncol = 3,
+    pt.size = 0.5)
+VlnPlot(
+    object = MFI025,
+    features = c("nCount_Spatial", "nFeature_Spatial", "percent.rb"),
+    ncol = 3,
+    pt.size = 0.5)
+VlnPlot(
+    object = MFI031,
+    features = c("nCount_Spatial", "nFeature_Spatial", "percent.rb"),
+    ncol = 3,
+    pt.size = 0.5)
+VlnPlot(
+    object = MFI094,
+    features = c("nCount_Spatial", "nFeature_Spatial", "percent.rb"),
+    ncol = 3,
+    pt.size = 0.5)
+
+subset(
+     MFI017,
+     nFeature_Spatial>200 &   percent.rb<20)-> MFI017
+subset(
+     MFI025,
+     nFeature_Spatial>200 &   percent.rb<20)-> MFI025
+subset(
+     MFI031,
+     nFeature_Spatial>200 &   percent.rb<20)-> MFI031
+subset(
+     MFI094,
+     nFeature_Spatial>200 &   percent.rb<20)-> MFI094
+
+
+MFIall.merge <- merge(MFI017, c(MFI025, MFI031, MFI094))
+MFIall.merge_list <- SplitObject(MFIall.merge)
+STO_list <- lapply(X = MFIall.merge_list, FUN = SCTransform, assay = 'Spatial', new.assay.name = 'SCT', vars.to.regress = c('nFeature_Spatial', 'nCount_Spatial', 'percent.rb'), vst.flavor = "v2", verbose=T)
+MFI.all.features <- SelectIntegrationFeatures(object.list = STO_list, nfeatures = 3000)
+MFI.all.merge <-Merge_Seurat_List(
+ STO_list,
+  add.cell.ids = NULL,
+  merge.data = TRUE,
+  project = "MFI.all"
+)
+VariableFeatures(MFI.all.merge) <- MFI.all.features
+MFI.all.merge.1cc <- RunPCA(MFI.all.merge, assay = "SCT", npcs = 50, group.by.vars="orig.ident")
+MFI.all.merge.2cc <- FindNeighbors(MFI.all.merge.1cc, dims = 1:30)
+MFI.all.merge.3cc <- FindClusters(MFI.all.merge.2cc, verbose = TRUE, resolution = 0.3)
+MFI.all.merge.4cc <- RunUMAP(MFI.all.merge.3cc, dims = 1:30)
+  DefaultAssay(MFI.all.merge.4cc) <- "SCT"
+  MFI.all.merge.4cca <- RunALRA(MFI.all.merge.4cc)
+
+MFI.all.merge.4cca.labeled <- RenameIdents(MFI.all.merge.4cca, '0' = "(C0) Myo-1",'6' = "(C6) Myo-2",'4' = "(C4) Vasc", '7' = "(C7) Blood", '1' = "(C1) Endo", '3' = "(C3) UtEp", '2' = "(C2) Ist",'5' = "(C5) IntTroph", '8' = "(C8) Areola-1", '9' = "(C9) Areola-2")
+
+#THIS FILE IS IMPORTED FOR SUBSEQUENT ANALYSIS
+# saveRDS(MFI.all.merge.4cca.labeled, file = "Visium_labeled_Final_6-18-24.rds")
+
+DefaultAssay(MFI.all.merge.4cca.labeled) <- "alra"
+cc_tissue_markers <- FindAllMarkers(object = MFI.all.merge.4cca.labeled, assay = "alra", thresh.use = 0.25, min.pct = 0.25, only.pos = TRUE)
+write.csv(cc_tissue_markers, "cc_tissue_markers_alra.csv")
+```
+
+```{r}
+#VISUALIZING VISIUM DATA
+
+#DIMPLOTS
+dimplot0.3res17<- SpatialDimPlot(MFI.all.merge.4cca,images = "MFI017",label = TRUE, label.size = 3, alpha = 0.5, repel = TRUE)
+
+dimplot0.3res25<- SpatialDimPlot(MFI.all.merge.4cc,images = "MFI025",label = TRUE, label.size = 3, alpha = 0.5, repel = TRUE)
+
+dimplot0.3res31<- SpatialDimPlot(MFI.all.merge.4cc , images = "MFI031", label = TRUE, label.size = 3, alpha = 0.5, repel = TRUE)
+
+dimplot0.3res94<- SpatialDimPlot(MFI.all.merge.4cc,images = "MFI094" ,label = TRUE, label.size = 3, alpha = 0.5, repel = TRUE)
+
+DIMPLOTCC<- DimPlot(MFI.all.merge.4cc, reduction = "umap", pt.size = 2, label = TRUE)
+
+# ggsave(filename = "MFI17dim.pdf", plot = dimplot0.3res17, height = 4, width = 6, units = "in")
+# ggsave(filename = "DIMPLOT.pdf", plot = DIMPLOTCC, height = 4, width = 8, units = "in")
+# ggsave(filename = "MFI31dim.pdf", plot = dimplot0.3res31, height = 4, width = 6, units = "in")
+# ggsave(filename = "MFI94dim.pdf", plot = dimplot0.3res94, height = 4, width = 6, units = "in")
+# ggsave(filename = "MFI25dim.pdf", plot = dimplot0.3res25, height = 4, width = 6, units = "in")
+
+
+#DOTPLOT OF KNOWN MARKERS
+dotplot_genes <- c("SMTN", "MYLK", "CNN1", "MYL9", "ACTG2", "CLDN11","CCL21","GJC2", "ALAS2","GJA5","HBM","AHSP", "MEP1B", "SOD3","ACP5", "SLPI","WFDC2","IGFBP2", "IGFBP3","CLU","APOE", "PEG10", "DLK1", "GPC3","ENSSSCG00000058512", "PAGE4", "CA4", "ENSSSCG00000006719", "BEX4", "CTSL", "SPINK4","LIF", "MMP25","CHGA", "LRP2", "CYP11A1","MMP7", "LPAR2")
+dotplot_markers_cca <- DotPlot(object = MFI.all.merge.4cca.labeled, features = dotplot_genes, assay = "alra", scale = TRUE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+# ggsave(filename = "New_dotplot_cca.pdf", plot = dotplot_markers_cca, height = 6, width = 14, units = "in")
+
+cc_tissue_markerssctprep <- FindAllMarkers(object = MFI.all.merge.4cca.labeled, assay = "SCT", min.pct = FALSE, logfc.threshold = 0.25, only.pos = TRUE)
+
+#VISUALIZING INDIVIDUAL TISSUE STRUCTURES
+Myometrium <- subset(MFI.all.merge.4cca.labeled, idents = c("(C0) Myo-1","(C6) Myo-2"))
+Myometriump<- SpatialDimPlot(Myometrium , images = "MFI094", label = TRUE, repel = TRUE, label.size = 5, alpha = 0.5, crop = FALSE)
+# ggsave(filename = "Myometrium.pdf", plot = Myometriump, height = 4, width = 4, units = "in")
+
+Endometrium <- subset(MFI.all.merge.4cca.labeled, idents = c("(C1) Endo", "(C3) UtEp"))
+Endometriump<- SpatialDimPlot(Endometrium ,images = "MFI094",label = TRUE,repel = TRUE ,label.size = 5, alpha = 0.5,crop = FALSE)
+# ggsave(filename = "Endometrium.pdf", plot = Endometriump, height = 4, width = 4, units = "in")
+
+areola <- subset(MFI.all.merge.4cca.labeled, idents = c("(C8) Areola-1", "(C9) Areola-2"))
+areolap<- SpatialDimPlot(areola , images = "MFI094",label = TRUE,repel = TRUE, label.size = 5, alpha = 0.5,crop = FALSE)
+# ggsave(filename = "areola.pdf", plot = areolap, height = 4, width = 4, units = "in")
+
+MFI <- subset(MFI.all.merge.4cca.labeled, idents = c("(C5) IntTroph"))
+MFIp<- SpatialDimPlot(MFI,images = "MFI094",label = TRUE, repel = TRUE,label.size = 5, alpha = 0.5,crop = FALSE)
+# ggsave(filename = "MFI.pdf", plot = MFIp, height = 4, width = 4, units = "in")
+
+BV <- subset(MFI.all.merge.4cca.labeled, idents = c("(C4) Vasc", "(C7) Blood"))
+BVp<- SpatialDimPlot(BV, images = "MFI025",label = TRUE,repel = TRUE ,label.size = 5, alpha = 0.5,crop = FALSE)
+# ggsave(filename = "BVCC.pdf", plot = BVp, height = 4, width = 4, units = "in")
+
+Interstitium <- subset(MFI.all.merge.4cca.labeled, idents = c("(C2) Ist"))
+Interstitiump <- SpatialDimPlot(Interstitium, images = "MFI094",label = TRUE,repel = TRUE ,label.size = 5, alpha = 0.5,crop = FALSE)
+# ggsave(filename = "InterstitiumCC.pdf", plot = Interstitiump, height = 4, width = 4, units = "in")
+
+placenta <- subset(MFI.all.merge.4cca.labeled, idents = c( "(C2) Ist", "(C5) IntTroph", "(C8) Areola-1", "(C9) Areola-2"))
+ppppp<- SpatialDimPlot(placenta, images = "MFI094",label = TRUE, label.size = 5, alpha = 0.5,crop = FALSE)
+# ggsave(filename = "PlacentaCC.png", plot = ppppp, height = 5, width = 5, units = "in")
+
+Trophoblast_pop <- subset(MFI.all.merge.4cca.labeled, idents = c("(C5) IntTroph", "(C8) Areola-1", "(C9) Areola-2"))
+tropop<- SpatialDimPlot(Trophoblast_pop, images = "MFI031",label = TRUE, label.size = 5, alpha = 1,crop = FALSE, pt.size = 2, repel = TRUE,cols=c("(C5) IntTroph"= "#00FFFF", "(C8) Areola-1"="#FF00FF", "(C9) Areola-2"= "#32CD32" ))
+
+DIMPLOTTrophoblastpop<- DimPlot(Trophoblast_pop, reduction = "umap", pt.size = 2, label = TRUE, cols=c("(C5) IntTroph"= "#00FFFF", "(C8) Areola-1"="#FF00FF", "(C9) Areola-2"= "#32CD32" ))
+
+# ggsave(filename = "Tropop_UMAP.pdf", plot = DIMPLOTTrophoblastpop, height = 5, width = 6, units = "in")
+
+
+dimplot0.3res94.labeled<- SpatialDimPlot(MFI.all.merge.4cca.labeled,images = "MFI094",label = TRUE, label.size = 4, alpha = 1, repel = TRUE,label.color = "black", cols=c("(C0) Myo-1"="#E69F00", "(C6) Myo-2"="#999999","(C4) Vasc" = "#D55E00","(C7) Blood"= "#F0E442","(C1) Endo"= "#CC79A7", "(C3) UtEp"="#0072B2", "(C2) Ist"= "#D2B48C", "(C5) IntTroph"= "#00FFFF", "(C8) Areola-1"="#FF00FF", "(C9) Areola-2"= "#32CD32" ), crop=T, stroke=0.2)
+
+ggsave(filename = "LabeledDimplot_MFI094.pdf", plot = dimplot0.3res94.labeled, height = 4, width = 6, units = "in")
+
+dimplot0.3res17.labeled<- SpatialDimPlot(MFI.all.merge.4cca.labeled,images = "MFI017",label = TRUE, label.size = 4, alpha = 1, repel = TRUE,label.color = "black", cols=c("(C0) Myo-1"="#E69F00", "(C6) Myo-2"="#999999","(C4) Vasc" = "#D55E00","(C7) Blood"= "#F0E442","(C1) Endo"= "#CC79A7", "(C3) UtEp"="#0072B2", "(C2) Ist"= "#D2B48C", "(C5) IntTroph"= "#00FFFF", "(C8) Areola-1"="#FF00FF", "(C9) Areola-2"= "#32CD32" ), crop=T, stroke=0.2)
+
+ggsave(filename = "LabeledDimplot_MFI017.pdf", plot = dimplot0.3res17.labeled, height = 4, width = 6, units = "in")
+
+dimplot0.3res25.labeled<- SpatialDimPlot(MFI.all.merge.4cca.labeled,images = "MFI025",label = TRUE, label.size = 4, alpha = 1, repel = TRUE,label.color = "black", cols=c("(C0) Myo-1"="#E69F00", "(C6) Myo-2"="#999999","(C4) Vasc" = "#D55E00","(C7) Blood"= "#F0E442","(C1) Endo"= "#CC79A7", "(C3) UtEp"="#0072B2", "(C2) Ist"= "#D2B48C", "(C5) IntTroph"= "#00FFFF", "(C8) Areola-1"="#FF00FF", "(C9) Areola-2"= "#32CD32" ), crop=T, stroke=0.2)
+
+ggsave(filename = "LabeledDimplot_MFI025.pdf", plot = dimplot0.3res25.labeled, height = 4, width = 6, units = "in")
+
+dimplot0.3res31.labeled<- SpatialDimPlot(MFI.all.merge.4cca.labeled,images = "MFI031",label = TRUE, label.size = 4, alpha = 1, repel = TRUE,label.color = "black", cols=c("(C0) Myo-1"="#E69F00", "(C6) Myo-2"="#999999","(C4) Vasc" = "#D55E00","(C7) Blood"= "#F0E442","(C1) Endo"= "#CC79A7", "(C3) UtEp"="#0072B2", "(C2) Ist"= "#D2B48C", "(C5) IntTroph"= "#00FFFF", "(C8) Areola-1"="#FF00FF", "(C9) Areola-2"= "#32CD32" ), crop=T, stroke=0.2)
+
+ggsave(filename = "LabeledDimplot_MFI031.pdf", plot = dimplot0.3res31.labeled, height = 4, width = 6, units = "in")
+
+
+
+DIMPLOTCClabel<- DimPlot(MFI.all.merge.4cca.labeled, reduction = "umap", pt.size = 2, label = TRUE, label.size = 8, cols=c("(C0) Myo-1"="#E69F00", "(C6) Myo-2"="#999999","(C4) Vasc" = "#D55E00","(C7) Blood"= "#F0E442","(C1) Endo"= "#CC79A7", "(C3) UtEp"="#0072B2", "(C2) Ist"= "#D2B48C", "(C5) IntTroph"= "#00FFFF", "(C8) Areola-1"="#FF00FF", "(C9) Areola-2"= "#32CD32" ))
+ggsave(filename = "CCdimplotlabeled.pdf", plot = DIMPLOTCClabel, height = 7, width = 12, units = "in")
+
+#Plots for subset of MFI Trophoblasts
+Trophoblast_pop <- subset(MFI.all.merge.4cca.labeled, idents = c("(C5) IntTroph", "(C8) Areola-1", "(C9) Areola-2"))
+tropop17<- SpatialDimPlot(Trophoblast_pop, images = "MFI017",label = TRUE, label.size = 5, alpha = 1,crop = FALSE, pt.size = 2, repel = TRUE,cols=c("(C5) IntTroph"= "#00FFFF", "(C8) Areola-1"="#FF00FF", "(C9) Areola-2"= "#32CD32" ))
+
+tropop31<- SpatialDimPlot(Trophoblast_pop, images = "MFI031",label = TRUE, label.size = 5, alpha = 1,crop = FALSE, pt.size = 2, repel = TRUE,cols=c("(C5) IntTroph"= "#00FFFF", "(C8) Areola-1"="#FF00FF", "(C9) Areola-2"= "#32CD32" ))
+
+ggsave(tropop17, file = "tropop17.pdf", height = 4, width = 4, dpi = 300)
+ggsave(tropop31, file = "tropop31.pdf", height = 4, width = 4, dpi = 300)
+
+```
+
+
+
+
+```{r}
+#STO SINGLE CELL ANALYSIS
+STO01.data <- Read10X(data.dir ="/Users/crm110/Desktop/STO01_filtered_feature/filtered_feature_bc_matrix")
+STO01 <- CreateSeuratObject(counts = STO01.data, project = "STO01", min.cells = 3, min.features = 200)
+
+STO02.data <- Read10X(data.dir ="/Users/crm110/Desktop/STO02_reanalysis/filtered_feature_bc_matrix")
+STO02 <- CreateSeuratObject(counts = STO02.data, project = "STO02", min.cells = 3, min.features = 200)
+
+STO04.data <- Read10X(data.dir ="/Users/crm110/Desktop/STO04 filtered feature/filtered_feature_bc_matrix")
+STO04 <- CreateSeuratObject(counts = STO04.data, project = "STO04", min.cells = 3, min.features = 200)
+
+apply(
+  STO01@assays$RNA@counts,
+  2,
+  function(x)(100*max(x))/sum(x)
+) -> STO01$Percent.Largest.Gene
+STO01[["percent.mt"]] <- PercentageFeatureSet(STO01, pattern = "^MT")
+STO01[["percent.rb"]] <- PercentageFeatureSet(STO01, pattern = "^RP[SL]")
+
+
+VlnPlot(
+  object = STO01,
+  features = c("nCount_RNA", "nFeature_RNA", "percent.mt", "percent.rb"),
+  ncol = 4,
+  pt.size = 0.5)
+
+apply(
+  STO02@assays$RNA@counts,
+  2,
+  function(x)(100*max(x))/sum(x)
+) -> STO02$Percent.Largest.Gene
+STO02[["percent.mt"]] <- PercentageFeatureSet(STO02, pattern = "^MT")
+STO02[["percent.rb"]] <- PercentageFeatureSet(STO02, pattern = "^RP[SL]")
+
+VlnPlot(
+  object = STO02,
+  features = c("nCount_RNA", "nFeature_RNA", "percent.mt", "percent.rb"),
+  ncol = 4,
+  pt.size = 0.5)
+
+apply(
+  STO04@assays$RNA@counts,
+  2,
+  function(x)(100*max(x))/sum(x)
+) -> STO04$Percent.Largest.Gene
+STO04[["percent.mt"]] <- PercentageFeatureSet(STO04, pattern = "^MT")
+STO04[["percent.rb"]] <- PercentageFeatureSet(STO04, pattern = "^RP[SL]")
+
+VlnPlot(
+  object = STO04,
+  features = c("nCount_RNA", "nFeature_RNA", "percent.mt", "percent.rb"),
+  ncol = 4,
+  pt.size = 0.5)
+
+
+
+
+STO01<- subset( STO01, nFeature_RNA>2500 & nFeature_RNA<15000 & nCount_RNA<200000 & percent.mt<1 & percent.mt>0.05 & percent.rb>3)
+
+STO02<- subset(STO02, nFeature_RNA>2500 & nFeature_RNA<15000 & nCount_RNA<200000 & percent.mt<1 & percent.mt>0.05 & percent.rb>3)
+
+STO04<- subset(STO04, nFeature_RNA>2500 & nFeature_RNA<15000 & nCount_RNA<200000 & percent.mt<1 & percent.mt>0.05 & percent.rb>3)
+
+
+STO01$sample <- "one"
+STO02$sample <- "two"
+STO04$sample <- "three"
+
+  STO_merge <- merge(STO01, y = c(STO02, STO04), add.cell.ids = c("STO01", "STO02", "STO04"), project = "Uninfected")
+  STO_list <- SplitObject(STO_merge)
+  STO_list <- lapply(X = STO_list, FUN = SCTransform, assay = 'RNA', new.assay.name = 'SCT', vars.to.regress = c ('percent.mt', 'percent.rb', 'nFeature_RNA' , 'nCount_RNA'))
+  
+  STO_features <- SelectIntegrationFeatures(object.list = STO_list, nfeatures = 4000)
+  STO_list <- PrepSCTIntegration(object.list = STO_list, anchor.features = STO_features)
+  STO_anchors <- FindIntegrationAnchors(object.list = STO_list, normalization.method = "SCT", anchor.features = STO_features)
+  STO_Integration <- IntegrateData(anchorset = STO_anchors, normalization.method = "SCT")
+  
+  # STO_regress <- SCTransform(STO_merge, vst.flavor = "v2")
+  STO_regress <- RunPCA(STO_Integration)
+  STO_regress <- RunUMAP(STO_regress,reduction = "pca", dims = 1:30)
+  STO_regress <- FindNeighbors(STO_regress, reduction = "pca", dims = 1:30)
+  STO_regress.2 <- FindClusters(STO_regress, resolution = 0.2)
+  DefaultAssay(STO_regress.2) <- "RNA"
+  STO_regress.2 <- NormalizeData(STO_regress.2)
+  STO_regress.2 <- ScaleData(STO_regress.2)
+  DefaultAssay(STO_regress.2) <- "SCT"
+  STO_regress.2a <- RunALRA(STO_regress.2)
+ 
+
+umap_STO_split <- DimPlot(STO_regress.2a, reduction = "umap", group.by = "ident", pt.size = 2, split.by = "orig.ident", cols =c( "0" = "#a6cee3", "1" = "#ff7f00", "2" = "#4daf4a", "3" = "#984ea3", "4" = "#a65628")) & NoAxes()
+ggsave(umap_STO_split, filename = "STO_UMAP_split.pdf", height = 4, width = 12, units = "in")
+
+
+umap_STO <- DimPlot(STO_regress.2a_labeled , reduction = "umap", pt.size = 2)
+ggsave(umap_STO, filename = "STO_UMAP.pdf", height = 4, width = 6, units = "in")
+
+
+DefaultAssay(STO_regress.2a) <- "alra"
+STO_regress.2a_markers_a <- FindAllMarkers(object = STO_regress.2a, assay = "alra", thresh.use = 0.25, min.pct = 0.25, only.pos = TRUE)
+write.csv(STO_regress.2a_markers_a, "STO_markers_alra.csv")
+
+
+DefaultAssay(STO_regress.2a) <- "alra"
+
+dotplotalramarkers_sTO <- c("WNT6", "TGM2", "ITGAL", "ENSSSCG00000011355", "FIBIN", "VWC2L", "SOX5", "NUPR1", "HSD11B2", "CCL27", "CLDN1", "OCLN", "ENSSSCG00000022258", "ANG", "TOP2A", "DIAPH3", "CDK1", "TUBB4B", "CENPF", "GBP1", "ISG20", "ISG15", "NLRC5", "CXCL8", "IRF1", "MDK", "COX1", "COX3", "COX2", "LAMA5", "ITGB1", "HSPG2", "ENSSSCG00000058815")
+dotplot_markers_sTO <- DotPlot(object = STO_regress.2a_labeled, features = dotplotalramarkers_sTO, assay = "alra", scale = TRUE, group.by = "seurat_clusters")+
+  coord_flip()+
+  theme(axis.text.x = element_text(hjust = 1))+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+ggsave(filename = "dotplot_markers_alra_STO.pdf", plot = dotplot_markers_sTO, height = 10, width = 7.5, units = "in")
+
+
+
+sTO_name <- c( "sTO" , "sTO", "sTO", "sTO", "sTO", "sTO", "sTO", "sTO", "sTO", "sTO", "sTO")
+names(sTO_name) <- levels(STO_regress.2a_labeled)
+sTO_rename <- RenameIdents(STO_regress.2a_labeled, sTO_name)
+print(levels(sTO_rename))
+
+DefaultAssay(sTO_rename) <- "alra"
+vlnplot_sto_tro <- VlnPlot(sTO_rename, features = c("KRT7", "KRT18", "KRT8", "CDH1","GATA3","GATA2","HAND1", "TP63", "VIM", "PDGFRA", "COL1A1", "FOXA2", "ENSSSCG00000013714", "CD34", "ENSSSCG00000006525"), ncol = 8, pt.size = 0, same.y.lims = TRUE)
+
+ggsave(filename = "VLNPLOT_Trophoblast_markers_sTO.pdf", plot = vlnplot_sto_tro, height = 6, width = 12, units = "in")
+
+ggsave(filename = "bs.png", plot = vlnplot_sto_tro, height = 6, width = 12, units = "in")
+
+#areola markers
+#ENSSSCG00000032149 = PLET1
+#ENSSSCG00000022925 = SLC2A3
+# CTSL (areola) PMID: 20107207
+# CTSB (all trophoblasts) PMID: 20107207
+# PLET1 (trophoblasts) 10.3390/ijms17122048
+# SLC2A3 (areola) reviewed PMID: 34807435
+# SLC2A1 (not at the tip of folds i.e. not the columnar cells) reviewed PMID: 34807435
+# SLC2A8 (columnar and areola) reviewed PMID: 34807435
+# FN1 (trophoblasts) https://doi.org/10.1080/10520295.2017.1374465
+# AQP5 (areola) PMID: 35605542
+# AQP3 (trophoblasts) PMID: 
+# ITGAV (trophectoderm) https://doi.org/10.1093/biolreprod/83.s1.445
+# ITGB3 (areola)  https://doi.org/10.1093/biolreprod/83.s1.445
+
+dotplotalramarkers_sTO_known <- c("CTSL","AQP5","ITGB3", "ENSSSCG00000022925", "SLC2A1", "SLC2A8")
+dotplot_markers_sTO_known <- DotPlot(object = STO, features = dotplotalramarkers_sTO_known, assay = "alra", scale = TRUE, group.by = "seurat_clusters")+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+ggsave(filename = "VLNPLOT_known_TB_markers_sTO.pdf", plot = dotplot_markers_sTO_known, height = 5, width = 4, units = "in")
+
+
+DefaultAssay(STO) <- "alra"
+KNOWNPAN_FP <- FeaturePlot(STO, features = c("CTSB", "KRT18"), cols = c("lightgrey", "royalblue4"),blend = FALSE)
+ggsave(filename = "KNOWNPAN_FP.pdf", plot = KNOWNPAN_FP, height = 2, width = 5, units = "in")
+
+ENSSSCG00000032149 <- SpatialFeaturePlot(object = VV, images = "MFI017", features = c("ENSSSCG00000032149", "FN1", "ITGAV"), alpha = c(0.1, 1), min.cutoff = "q1", max.cutoff = "q99", ncol = 6)
+
+
+#sTO subset for figure panels
+STO_troph <- subset(STO_regress.2a_labeled, idents = c("(C0) IntTroph","(C1) Areola-2", "(C2) ProfTroph"))
+
+
+STO_Troph_DIMPLOT <- DimPlot(STO_troph, reduction = "umap", pt.size = 2, label = TRUE,     cols = c( "(C0) IntTroph" = "#a6cee3", "(C1) Areola-2" = "#ff7f00", "(C2) ProfTroph" = "#4daf4a"))
+ggsave(STO_Troph_DIMPLOT, file = "STO_Trophoblasts_Trajectory.pdf", height = 4, width = 6)
+```
+
+```{r}
+#PROBABALISTIC MODELING OF STO AND TISSUE
+DefaultAssay(STO_regress.2a_labeled) <- "integrated"
+DefaultAssay(Trophoblast_pop) <- "SCT"
+anchors <- FindTransferAnchors(reference = STO_regress.2a_labeled, query = Trophoblast_pop, normalization.method = "SCT")
+predictions.assay <- TransferData(anchorset = anchors, refdata = STO_regress.2a_labeled$seurat_clusters, prediction.assay = TRUE, weight.reduction = Trophoblast_pop[["pca"]], dims = 1:30)
+Trophoblast_pop[["predictions"]] <- predictions.assay
+library(RColorBrewer)
+SpatialColors <- colorRampPalette(colors = rev(x = brewer.pal(n = 11, name = "Spectral")))
+DefaultAssay(Trophoblast_pop) <- "predictions"
+
+Placenta_facet_prediction31 <- SpatialFeaturePlot(Trophoblast_pop, images = "MFI031", features = c("0", "1", "2", "3", "4"), pt.size.factor = 1.6, ncol = 5, crop = FALSE, alpha = 1, keep.scale = "all")
+ ggsave(filename = "Placenta_facet_prediction31.pdf", plot = Placenta_facet_prediction31, height = 8, width = 16, units = "in")
+
+Placenta_facet_prediction17 <- SpatialFeaturePlot(Trophoblast_pop, images = "MFI017", features = c("0", "1", "2", "3", "4"), pt.size.factor = 1.6, ncol = 5, crop = FALSE, alpha = 1, keep.scale = "all")
+ ggsave(filename = "Placenta_facet_prediction17.pdf", plot = Placenta_facet_prediction17, height = 8, width = 16, units = "in")
+ 
+ Placenta_facet_prediction25 <- SpatialFeaturePlot(Trophoblast_pop, images = "MFI025", features = c("0", "1", "2", "3", "4"), pt.size.factor = 1.6, ncol = 5, crop = FALSE, alpha = 1, keep.scale = "all")
+ ggsave(filename = "Placenta_facet_prediction25.pdf", plot = Placenta_facet_prediction25, height = 8, width = 16, units = "in")
+ 
+  Placenta_facet_prediction94 <- SpatialFeaturePlot(Trophoblast_pop, images = "MFI094", features = c("0", "1", "2", "3", "4"), pt.size.factor = 1.6, ncol = 5, crop = FALSE, alpha = 1, keep.scale = "all")
+ ggsave(filename = "Placenta_facet_prediction94.pdf", plot = Placenta_facet_prediction94, height = 8, width = 16, units = "in")
+
+
+```
+
+
+```{r}
+
+STO_regress.2a_labeled <- RenameIdents(STO_regress.2a, '0' = "(C0) IntTroph",'1' = "(C1) Areola-2",'2' = "(C2) ProfTroph", '3' = "(C3) UnkTroph", '4' = "(C4) Areola-1")
+
+#IMPORT THIS FOR SUBSEQUENT ANALYSES
+# saveRDS(STO_regress.2a, file = "STO_labeled_8-29-24.rds")
+# STO_regress.2a_labeled <-  readRDS("STO_labeled_8-29-24.rds")
+
+
+#Identification of shared markers between sTO and corresponding Visium clusters
+
+STO_regress.2a_labeledp <-  PrepSCTFindMarkers(STO_regress.2a_labeled)
+STO_SCT_Markers <- FindAllMarkers(
+  object = STO_regress.2a_labeledp,
+  only.pos = TRUE,       # only return genes more highly expressed in the cluster
+  min.pct = 0.25,        # expressed in at least 25% of cells
+  logfc.threshold = 0.25, 
+  assay = "SCT" # minimum log fold change
+)
+
+# VV <- readRDS("Visium_labeled_Final_6-18-24.rds")
+VVp <-  PrepSCTFindMarkers(VV)
+VV_SCT_Markers <- FindAllMarkers(
+  object = VVp,
+  only.pos = TRUE,       # only return genes more highly expressed in the cluster
+  min.pct = 0.25,        # expressed in at least 25% of cells
+  logfc.threshold = 0.25, 
+  assay = "SCT" # minimum log fold change
+)
+
+
+#110 shared markers areola3
+Visium_areola2_9 <- VV_SCT_Markers %>% 
+  filter(cluster == "(C9) Areola-2")
+
+areola_3_STO_3 <- STO_SCT_Markers %>% 
+  filter(cluster == "(C3) Areola-3")
+
+areola_3_STO_3_i<- areola_3_STO_3 %>% 
+  inner_join(Visium_areola2_9, by = "gene")
+areola_3_STO_3_i
+write.csv(areola_3_STO_3_i, "areola_3_shared_sTO_markers.csv")
+
+
+#63 shared markers
+areola2_STO_1 <- STO_SCT_Markers %>% 
+  filter(cluster == "(C1) Areola-2")
+
+areola2_shared_i<- areola2_STO_1 %>% 
+  inner_join(Visium_areola2_9, by = "gene")
+areola2_shared_i
+write.csv(areola2_shared_i, "areola2_shared_sTO_markers.csv")
+
+
+#20 shared 
+Visium_areola1_8 <- VV_SCT_Markers %>% 
+  filter(cluster == "(C8) Areola-1")
+
+areola1_STO_4 <- STO_SCT_Markers %>% 
+  filter(cluster == "(C4) Areola-1")
+
+areola1_shared_i<- areola1_STO_4 %>% 
+  inner_join(Visium_areola1_8, by = "gene")
+areola1_shared_i
+write.csv(areola1_shared_i, "areola1_shared_sTO_markers.csv")
+
+
+
+#59 shared markers
+Visium_inttro_5 <- VV_SCT_Markers %>% 
+  filter(cluster == "(C5) IntTroph")
+
+Inttro_STO_0 <- STO_SCT_Markers %>% 
+  filter(cluster == "(C0) IntTroph")
+
+Inttro_shared_i<- Inttro_STO_0 %>% 
+  inner_join(Visium_inttro_5, by = "gene")
+Inttro_shared_i
+write.csv(Inttro_shared_i, "Inttro_shared_sTO_markers.csv")
+
+
+
+
+#SHARED FEATURES PLOTS
+DefaultAssay(STO_regress.2a_labeled) <- "SCT"
+
+dotplotalramarkers2 <- c("TGM2", "C1QTNF4", "ENSSSCG00000017061", "AKR1B1", "NUPR1", "SLC7A4", "CTSA", "CTSD","ENSSSCG00000026302", "TOP2A","B2M", "MDK", "FTL", "ISG15", "CYTB", "COX1", "COX3", "ND4")
+
+dotplot_markers_sharedsTO <- DotPlot(object = STO_regress.2a_labeled, features = dotplotalramarkers2, assay = "SCT", scale = TRUE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  coord_flip()+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+ggsave(filename = "dotplot_markers_STO_2.pdf", plot = dotplot_markers_sharedsTO, height = 5, width = 6, units = "in")
+
+Trophoblast_pop <- subset(VV, idents = c("(C5) IntTroph", "(C8) Areola-1", "(C9) Areola-2"))
+
+dotplot_markers_sharedVisium <- DotPlot(object = Trophoblast_pop, features = dotplotalramarkers2, assay = "SCT", scale = TRUE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  coord_flip()+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+ggsave(filename = "dotplot_markers_SCT_Visium_2.pdf", plot = dotplot_markers_sharedVisium, height = 5, width = 6, units = "in")
+``` 
+
+```{r}
+######barplots 
+
+#labeled sTO
+barplot_proportion_rename <- dittoBarPlot(
+    object = STO_regress.2a_labeled,
+    var = "ident",
+    group.by = "orig.ident", 
+    color.panel = c( "(C0) IntTroph" = "#00FFFF", "(C1) Areola-2" = "#32CD32", "(C2) ProfTroph" = "#F0E442", "(C3) UnkTroph" = "#984ea3", "(C4) Areola-1" = "#FF00FF"))
+
+ggsave(plot = barplot_proportion_rename, "barplot_proportion_sTO_rename.pdf", height = 6, width = 4, units = "in")
+
+
+#unlabeled sTO
+barplot_proportion <- dittoBarPlot(
+    object = STO_regress.2a,
+    var = "seurat_clusters",
+    group.by = "orig.ident", 
+    color.panel = c( "0" = "#a6cee3", "1" = "#ff7f00", "2" = "#4daf4a", "3" = "#984ea3", "4" = "#a65628"))
+
+ggsave(plot = barplot_proportion, "barplot_proportion_sTO.pdf", height = 6, width = 6, units = "in")
+
+
+#MFI barplot
+barplot_proportion_visium_full <- dittoBarPlot(
+    object = MFI.all.merge.4cca.labeled,
+    var = "ident",
+    group.by = "MFI",
+    color.panel = c("(C0) Myo-1"="#E69F00", "(C6) Myo-2"="#999999","(C4) Vasc" = "#D55E00","(C7) Blood"= "#F0E442","(C1) Endo"= "#CC79A7", "(C3) UtEp"="#0072B2", "(C2) Ist"= "#D2B48C", "(C5) IntTroph"= "#00FFFF", "(C8) Areola-1"="#FF00FF", "(C9) Areola-2"= "#32CD32" ))
+
+ggsave(plot = barplot_proportion_visium_full, "barplot_proportion_visium_full_cc.pdf", height = 6, width = 4, units = "in")
+
+
+#MFI subset Trophoblasts barplot
+Trophoblast_pop <- subset(MFI.all.merge.4cca.labeled, idents = c("(C5) IntTroph", "(C8) Areola-1", "(C9) Areola-2"))
+tropopbarplot <- dittoBarPlot(
+    object = Trophoblast_pop,
+    var = "ident",
+    group.by = "MFI",
+    color.panel = c("(C5) IntTroph"= "#00FFFF", "(C8) Areola-1"="#FF00FF", "(C9) Areola-2"= "#32CD32" ))
+
+ggsave(plot = tropopbarplot, "tropopbarplot.pdf", height = 6, width = 4, units = "in")
+```
+
+```{r}
+#identifying pan-trophoblast markers
+
+Trophoblast_id <- c( "Other" , "Other", "Other", "Other", "Other", "Trophoblast", "Other", "Other",  "Trophoblast", "Trophoblast")
+names(Trophoblast_id) <- levels(MFI.all.merge.4cca)
+MFI.merge.4.rename2 <- RenameIdents(MFI.all.merge.4cca, Trophoblast_id)
+print(levels(MFI.merge.4.rename2))
+
+DefaultAssay(MFI.merge.4.rename2) <- "alra"
+Trophoblast_markers <- FindMarkers(MFI.merge.4.rename2, ident.1 = "Trophoblast", ident.2 = "Other")
+write.csv(Trophoblast_markers, "Pan_Trophoblast_markers_cc.csv")
+
+
+#Structure Specific Trophoblast Markers
+Trophoblast_id_2 <- c( "Other" , "Other", "Other", "Other", "Other", "Interface-Trophoblasts", "Other", "Other",  "Areola", "Areola")
+names(Trophoblast_id_2) <- levels(MFI.all.merge.4cca)
+MFI.merge.4.rename3 <- RenameIdents(MFI.all.merge.4cca, Trophoblast_id_2)
+print(levels(MFI.merge.4.rename3))
+
+DefaultAssay(MFI.merge.4.rename3) <- "alra"
+Trophoblast_markers2 <- FindAllMarkers(MFI.merge.4.rename3)
+write.csv(Trophoblast_markers2, "Specific_Trophoblast_markers_cc.csv")
+
+#Areola-1 and Areola-2 comparitive markers
+Trophoblast_id_3 <- c( "Other" , "Other", "Other", "Other", "Other", "Other", "Other", "Other",  "Areola-1", "Areola-2")
+names(Trophoblast_id_3) <- levels(MFI.all.merge.4cca)
+MFI.merge.4.rename4 <- RenameIdents(MFI.all.merge.4cca, Trophoblast_id_3)
+print(levels(MFI.merge.4.rename4))
+
+DefaultAssay(MFI.merge.4.rename4) <- "alra"
+Trophoblast_markers_areolae <- FindMarkers(MFI.merge.4.rename4, ident.1 = "Areola-1", ident.2 = "Areola-2")
+write.csv(Trophoblast_markers_areolae, "Comparative_areola_markers_cc.csv")
+
+
+#Another way to perform markers for specific trophoblast populations
+Trophoblast_id_4 <- c( "Other" , "Other", "Other", "Other", "Other", "Other", "Interface-Trophoblasts", "Other",  "Areola-1", "Areola-2")
+names(Trophoblast_id_4) <- levels(MFI.all.merge.4cca.labeled)
+MFI.merge.4.rename5 <- RenameIdents(MFI.all.merge.4cca.labeled, Trophoblast_id_4)
+print(levels(MFI.merge.4.rename5))
+
+
+
+#feature plots of trophoblast markers of interest
+# VV <- readRDS("Visium_labeled_Final_6-18-24.rds")
+
+DefaultAssay(VV) <- "alra"
+pantromarkers1 <- SpatialFeaturePlot(object = VV, images = "MFI017", features = c("CTSZ", "CTSB","CA4", "ENSSSCG00000058512", "CTSL", "MMP7", "AGR2","ENSSSCG00000004415", "SPINK4"), alpha = c(1, 1), min.cutoff = "q1", max.cutoff = "q99", ncol = 9)
+
+pantromarkers2 <- SpatialFeaturePlot(object = VV, images = "MFI031", features = c("CTSZ", "CTSB","CA4", "ENSSSCG00000058512", "CTSL", "MMP7", "AGR2","ENSSSCG00000004415", "SPINK4"), alpha = c(1, 1), min.cutoff = "q1", max.cutoff = "q99", ncol = 9)
+ ggsave(filename = "pantromarkersfp1.pdf", plot = pantromarkers1, height = 8, width = 20, units = "in")
+  ggsave(filename = "pantromarkersfp2.pdf", plot = pantromarkers2, height = 8, width = 20, units = "in")
+
+#DOTPLOTS of trophoblast markers of interest
+dotplot_areola_compare_genes <- c("CA4", "ENSSSCG00000058512","BPI","MGP","GRN","BEX4","AKR1B1","ENSSSCG00000032149","PAGE4","ENSSSCG00000052816"
+,"SRARP", "SLC45A3", "CHST8","PAPSS2","CCK","ENSSSCG00000004415","SPINK4", "MMP25", "FBP2", "CPA1", "CHST3", "ENSSSCG00000002709", "SMPDL3A","ENSSSCG00000048235","MDK","CTSD","LRP2","NPC2","ENSSSCG00000015217","AGR2","MMP7", "PRDX3")
+
+dotplot_markers_areola <- DotPlot(object = VV, features = dotplot_areola_compare_genes, assay = "alra", scale = TRUE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+dotplot_markers_sTO_compare_areola <- DotPlot(object = STO, features = dotplot_areola_compare_genes, group.by = "seurat_clusters",assay = "alra", scale = TRUE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+ ggsave(filename = "comparing_areola_visium.pdf", plot = dotplot_markers_areola, height = 4, width = 10, units = "in")
+  ggsave(filename = "comparing_areola_sTO.pdf", plot = dotplot_markers_sTO_compare_areola, height = 4, width = 9, units = "in")
+```
+
+
+
+
+
+
+```{r}
+#GO TERM ANALYSIS
+library(EnhancedVolcano)
+#comparative areolae and mfi sto
+DefaultAssay(STO_regress.2a_labeled) <- "alra"
+GO_STO <- FindMarkers(STO_regress.2a_labeled, ident.1 = "(C0) IntTroph", ident.2 = "(C1) Areola-2", only.pos = FALSE, logfc.threshold = 0.01)
+write.csv(GO_STO, "INTvsareola2STO.csv")
+sTO_table <- read.table("INTvsareola2STO.txt", sep="\t",header=T, row.names=1)
+
+DefaultAssay(MFI.merge.4.rename5) <- "alra"
+Trophoblast_markers_GO <- FindMarkers(MFI.merge.4.rename5, ident.1 = "Interface-Trophoblasts", ident.2 = "Areola-2", only.pos = FALSE, logfc.threshold = 0.01)
+write.csv(Trophoblast_markers_GO, "INTvs2.csv")
+Visium_table <- read.table("INTvs2.txt", sep="\t",header=T, row.names=1)
+
+
+ MFI_vs_areolae <-  EnhancedVolcano(sTO_table,
+    lab = rownames(sTO_table),
+    x = 'avg_log2FC',
+    y = 'p_val_adj',
+    xlim = c(-0.75, 0.75),
+    title = 'MFI Trophoblasts vs Areolae Trophoblasts (sTO)',
+    pCutoff = 10e-3,
+    FCcutoff = 0.25,
+    pointSize = 3.0,
+       gridlines.major = FALSE,
+    gridlines.minor = FALSE,
+       col=c('grey', 'grey', 'grey', 'red'))
+ 
+ pdf('MFI_vs_areolae_vp.pdf', height = 6, width = 8)
+  print(MFI_vs_areolae)
+dev.off()
+ 
+  MFI_vs_areolae_visium <-  EnhancedVolcano(Visium_table,
+    lab = rownames(Visium_table),
+    x = 'avg_log2FC',
+    y = 'p_val_adj',
+    xlim = c(-3, 3),
+    title = 'MFI Trophoblasts vs Areolae Trophoblasts (Visium)',
+    pCutoff = 10e-3,
+    FCcutoff = 0.25,
+    pointSize = 3.0,
+       gridlines.major = FALSE,
+    gridlines.minor = FALSE,
+       col=c('grey', 'grey', 'grey', 'blue'))
+ 
+pdf('MFI_vs_areolae_vp_visium.pdf', height = 6, width = 8)
+  print(MFI_vs_areolae_visium)
+dev.off()
+
+
+#supplemental Dotplot endosomes
+
+endosome <- c("HTR4", "ARL8B", "ACAP1", "CXCR4", "CD63", "EHD1", "LRP2", "NPC1", "OCRL", "RAB11FIP4" , "RAB11A", "RAB13", "RAB1A", "RAB31", "RAB5C", "RAPGEF6", "STEAP1", "VPS11", "VPS33A", "VPS37B", "VPS37C", "WDR91", "ANXA1", "CHMP2B", "CHMP3", "CHMP6", "DBNL", "CLCN3", "IFRD2", "LAMP1", "LAMP2", "MCCC1", "MCOLN1", "MVB12B", "OPTN", "PLIN3", "PIP4P1", "PLEKHM1", "PMEPA1", "RUBCN", "SERPINB1", "STAM", "SLC11A2", "SLC31A1", "SLC38A9", "SLC46A1", "SNX1", "SNX2", "SNX3", "UNC13D", "VAMP7", "VAMP8")
+
+dotplot_markers_endosome <- DotPlot(object = MFI.merge.4.rename5, features = endosome, assay = "alra", scale = TRUE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+ggsave(filename = "Visium_Endosome.pdf", plot = dotplot_markers_endosome, height = 3, width = 14, units = "in")
+
+dotplot_markers_endosomessTO <- DotPlot(object = STO, features = endosome, assay = "alra", scale = TRUE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+ggsave(filename = "sTO_Endosome.pdf", plot = dotplot_markers_endosomessTO, height = 3, width = 13, units = "in")
+
+```
+
+
+```{r}
+########CELLCHAT SCRIPT VISIUM
+
+VV <- readRDS("Visium_labeled_Final_6-18-24.rds")
+
+cluster.ids <- c("Myo",
+                 "Myo",
+                 "Vasc",
+                 "Blood",
+                 "Endo",
+                 "UtEp", "Ist", "IntTroph", "Areola", "Areola")
+
+names(cluster.ids) <- levels(VV)
+Spatial2 <- RenameIdents(VV, cluster.ids)
+print(levels(Spatial2))
+
+Spatial.list <- SplitObject(Spatial2, split.by="MFI")
+head(Spatial.list)
+
+MFI017.split <- Spatial.list$MFI017
+MFI025.split <- Spatial.list$MFI025
+MFI031.split <- Spatial.list$MFI031
+MFI094.split <- Spatial.list$MFI094
+
+MFI017.split@images <- MFI017.split@images[!(names(MFI017.split@images) %in% c("MFI025", "MFI031", "MFI094"))]
+MFI025.split@images <- MFI025.split@images[!(names(MFI025.split@images) %in% c("MFI017", "MFI031", "MFI094"))]
+MFI031.split@images <- MFI031.split@images[!(names(MFI031.split@images) %in% c("MFI017", "MFI025", "MFI094"))]
+MFI094.split@images <- MFI094.split@images[!(names(MFI094.split@images) %in% c("MFI017", "MFI025", "MFI031"))]
+
+MFI017.split
+MFI025.split
+MFI031.split
+MFI094.split
+
+# saveRDS(MFI017.split, file = "MFI017.split_7.9.24.rds")
+# saveRDS(MFI025.split, file = "MFI025.split_7.9.24.rds")
+# saveRDS(MFI031.split, file = "MFI031.split_7.9.24.rds")
+# saveRDS(MFI094.split, file = "MFI094.split_7.9.24.rds")
+
+data.input17 = Seurat::GetAssayData(MFI017.split, slot = "data", assay = "alra")
+data.input25 = Seurat::GetAssayData(MFI025.split, slot = "data", assay = "alra")
+data.input31 = Seurat::GetAssayData(MFI031.split, slot = "data", assay = "alra")
+data.input94 = Seurat::GetAssayData(MFI094.split, slot = "data", assay = "alra")
+
+genes.common <- Reduce(intersect, list(rownames(data.input17), rownames(data.input25), rownames(data.input31), rownames(data.input94)))
+colnames(data.input17) <- paste0("A17_", colnames(data.input17))
+colnames(data.input25) <- paste0("A25_", colnames(data.input25))
+colnames(data.input31) <- paste0("A31_", colnames(data.input31))
+colnames(data.input94) <- paste0("A94_", colnames(data.input94))
+data.input <- cbind(data.input17[genes.common, ], data.input25[genes.common, ], data.input31[genes.common, ], data.input94[genes.common, ])
+
+
+meta17 = data.frame(labels = Idents(MFI017.split), samples = "A17") # manually create a dataframe consisting of the cell labels
+meta25 = data.frame(labels = Idents(MFI025.split), samples = "A25") 
+meta31 = data.frame(labels = Idents(MFI031.split), samples = "A31") 
+meta94 = data.frame(labels = Idents(MFI094.split), samples = "A94") 
+meta <- rbind(meta17, meta25, meta31, meta94)
+rownames(meta) <- colnames(data.input)
+levels_017 <- levels(Idents(MFI017.split))
+levels_025 <- levels(Idents(MFI025.split))
+levels_031 <- levels(Idents(MFI031.split))
+levels_094 <- levels(Idents(MFI094.split))
+
+combined_levels <- unique(c(levels_017, levels_025, levels_031, levels_094))
+meta$labels <- factor(meta$labels, levels = combined_levels)
+print(levels(meta$labels))
+meta$samples <- factor(meta$samples, levels = c("A17", "A25", "A31", "A94"))
+unique(meta$labels)
+
+spatial.locs17 = Seurat::GetTissueCoordinates(MFI017.split, scale = NULL, cols = c("imagerow", "imagecol")) 
+spatial.locs25 = Seurat::GetTissueCoordinates(MFI025.split, scale = NULL, cols = c("imagerow", "imagecol")) 
+spatial.locs31 = Seurat::GetTissueCoordinates(MFI031.split, scale = NULL, cols = c("imagerow", "imagecol")) 
+spatial.locs94 = Seurat::GetTissueCoordinates(MFI094.split, scale = NULL, cols = c("imagerow", "imagecol")) 
+spatial.locs <- rbind(spatial.locs17, spatial.locs25, spatial.locs31, spatial.locs94)
+rownames(spatial.locs) <- colnames(data.input)
+
+scalefactors17 = jsonlite::fromJSON(txt = file.path("/Users/crm110/Desktop/Data/MFI017/outs/spatial", 'scalefactors_json.json'))
+spot.size = 65 # the theoretical spot size (um) in 10X Visium
+conversion.factor17 = spot.size/scalefactors17$spot_diameter_fullres
+spatial.factors17 = data.frame(ratio = conversion.factor17, tol = spot.size/2)
+
+scalefactors25 = jsonlite::fromJSON(txt = file.path("/Users/crm110/Desktop/Data/MFI025/outs/spatial", 'scalefactors_json.json'))
+spot.size = 65
+conversion.factor25 = spot.size/scalefactors25$spot_diameter_fullres
+spatial.factors25 = data.frame(ratio = conversion.factor25, tol = spot.size/2)
+
+scalefactors31 = jsonlite::fromJSON(txt = file.path("/Users/crm110/Desktop/Data/MFI031/outs/spatial", 'scalefactors_json.json'))
+spot.size = 65
+conversion.factor31 = spot.size/scalefactors31$spot_diameter_fullres
+spatial.factors31 = data.frame(ratio = conversion.factor31, tol = spot.size/2)
+
+scalefactors94 = jsonlite::fromJSON(txt = file.path("/Users/crm110/Desktop/Data/MFI094/outs/spatial", 'scalefactors_json.json'))
+spot.size = 65
+conversion.factor94 = spot.size/scalefactors94$spot_diameter_fullres
+spatial.factors94 = data.frame(ratio = conversion.factor94, tol = spot.size/2)
+
+spatial.factors <- rbind(spatial.factors17, spatial.factors25, spatial.factors31, spatial.factors94)
+rownames(spatial.factors) <- c("A17", "A25", "A31", "A94")
+
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels",
+                           datatype = "spatial", coordinates = spatial.locs, spatial.factors = spatial.factors)
+
+interaction_input <- read.csv(file = "interaction_input_CellChatDBedit.csv", row.names = 1)
+complex_input <- read.csv(file = "complex_input_CellChatDBedit.csv", row.names = 1)
+cofactor_input <- read.csv(file = "cofactor_input_CellChatDB.csv", row.names = 1)
+geneInfo <- read.csv(file = "geneInfo_input_CellChatDB.csv", row.names = 1)
+CellChatDB <- list()
+CellChatDB$interaction <- interaction_input
+CellChatDB$complex <- complex_input
+CellChatDB$cofactor <- cofactor_input
+CellChatDB$geneInfo <- geneInfo 
+CellChatDB.use <- CellChatDB
+cellchat@DB <- CellChatDB.use
+cellchat <- subsetData(cellchat)
+
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.1, 
+                              distance.use = FALSE, interaction.range = 250, scale.distance = NULL,
+                              contact.dependent = TRUE, contact.range = 100)
+
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+
+cellchat@netP[["pathways"]]
+
+
+library(png)
+MFI017_image_path <- "/Users/crm110/Desktop/Data/MFI017/outs/spatial/tissue_lowres_image.png"
+MFI017_image_matrix <- readPNG(MFI017_image_path)
+MFI025_image_path <- "/Users/crm110/Desktop/Data/MFI025/outs/spatial/tissue_lowres_image.png"
+MFI025_image_matrix <- readPNG(MFI025_image_path)
+MFI031_image_path <- "/Users/crm110/Desktop/Data/MFI031/outs/spatial/tissue_lowres_image.png"
+MFI031_image_matrix <- readPNG(MFI031_image_path)
+MFI094_image_path <- "/Users/crm110/Desktop/Data/MFI094/outs/spatial/tissue_lowres_image.png"
+MFI094_image_matrix <- readPNG(MFI094_image_path)
+
+groupSize <- as.numeric(table(cellchat@idents))
+par(mfrow = c(1,2), xpd=TRUE)
+
+
+#NET VISUAL CIRCLE PLOTS VISIUM
+ par(mfrow=c(1,1))
+pdf(file ="netvisualcirclesvisiumcount.pdf", width = 10, height =5)
+netVisual_circle(cellchat@net$count, vertex.weight = rowSums(cellchat@net$count), weight.scale = T, label.edge= F, title.name = "Number of interactions", color.use = c("Myo"="#E69F00", "Vasc" = "#D55E00","Blood"= "#F0E442","Endo"= "#CC79A7", "UtEp"="#0072B2", "Ist"= "#D2B48C", "IntTroph"= "#00FFFF", "Areola"="#FF00FF"))
+dev.off()
+
+ par(mfrow=c(1,1))
+pdf(file ="netvisualcirclesvisiumstrength.pdf", width = 10, height =5)
+netVisual_circle(cellchat@net$weight, vertex.weight = rowSums(cellchat@net$weight), weight.scale = T, label.edge= F, title.name = "Interaction weights/strength", color.use = c("Myo"="#E69F00", "Vasc" = "#D55E00","Blood"= "#F0E442","Endo"= "#CC79A7", "UtEp"="#0072B2", "Ist"= "#D2B48C", "IntTroph"= "#00FFFF", "Areola"="#FF00FF"))
+dev.off()
+
+
+#NET VISIUAL HEATMAP VISIUM
+ par(mfrow=c(1,1))
+pdf(file ="netvisualheatmapvisium.pdf", width = 10, height =5)
+netVisual_heatmap(cellchat, color.use=c("Myo"="#E69F00", "Vasc" = "#D55E00","Blood"= "#F0E442","Endo"= "#CC79A7", "UtEp"="#0072B2", "Ist"= "#D2B48C", "IntTroph"= "#00FFFF", "Areola"="#FF00FF"), font.size = 12, cluster.rows = TRUE, cluster.cols = T)+
+netVisual_heatmap(cellchat, measure = "weight", color.use=c("Myo"="#E69F00", "Vasc" = "#D55E00","Blood"= "#F0E442","Endo"= "#CC79A7", "UtEp"="#0072B2", "Ist"= "#D2B48C", "IntTroph"= "#00FFFF", "Areola"="#FF00FF"), font.size = 12, cluster.rows = TRUE, cluster.cols = T)
+dev.off()
+
+#VISIUM PATTERNING ANALYSIS
+selectK(cellchat, pattern = "outgoing")
+selectK(cellchat, pattern = "incoming")
+
+  par(mfrow=c(1,1))
+pdf(file ="patternsvisiumoutshort.pdf", width = 8, height =6)
+nPatterns = 3
+identifyCommunicationPatterns(cellchat, pattern = "outgoing", k = nPatterns, color.heatmap="RdBu",color.use=c("Myo"="#E69F00", "Vasc" = "#D55E00","Blood"= "#F0E442","Endo"= "#CC79A7", "UtEp"="#0072B2", "Ist"= "#D2B48C", "IntTroph"= "#00FFFF", "Areola"="#FF00FF"), width = 3, height=6)
+dev.off()
+
+  par(mfrow=c(1,1))
+pdf(file ="patternsvisiumouttall.pdf", width = 5, height =25)
+identifyCommunicationPatterns(cellchat, pattern = "outgoing", k = nPatterns, color.heatmap="RdBu", width = 3, height=25)
+dev.off()
+
+  par(mfrow=c(1,1))
+pdf(file ="patternsVisiuminshort.pdf", width = 8, height =6)
+nPatterns = 3
+identifyCommunicationPatterns(cellchat, pattern = "incoming", k = nPatterns, color.heatmap="RdBu", width = 3, height=6)
+dev.off()
+
+  par(mfrow=c(1,1))
+pdf(file ="patternsvisiumintall.pdf", width = 5, height =25)
+identifyCommunicationPatterns(cellchat, pattern = "incoming", k = nPatterns, color.heatmap="RdBu", width = 3, height=25)
+dev.off()
+
+
+
+#PATHWAYS OF INTEREST VISISUM
+MK.pathways.show <- c("MK")
+IL6.pathways.show <- c("IL6")
+HSPG.pathways.show <- c("HSPG")
+
+
+ par(mfrow=c(1,1))
+pdf(file ="IL6_visium.pdf", width = 20, height =16)
+netVisual_aggregate(cellchat, signaling = IL6.pathways.show,color.use = c("Myo"="#E69F00", "Vasc" = "#D55E00","Blood"= "#F0E442","Endo"= "#CC79A7", "UtEp"="#0072B2", "Ist"= "#D2B48C", "IntTroph"= "#00FFFF", "Areola"="#FF00FF"), layout = "chord")
+dev.off()
+
+ par(mfrow=c(1,1))
+pdf(file ="HSPG_visium.pdf", width = 20, height =16)
+netVisual_aggregate(cellchat, signaling = HSPG.pathways.show,color.use = c("Myo"="#E69F00", "Vasc" = "#D55E00","Blood"= "#F0E442","Endo"= "#CC79A7", "UtEp"="#0072B2", "Ist"= "#D2B48C", "IntTroph"= "#00FFFF", "Areola"="#FF00FF"), layout = "chord")
+dev.off()
+
+  par(mfrow=c(1,1))
+pdf(file ="MK_visium.pdf", width = 20, height =16)
+netVisual_aggregate(cellchat, signaling = MK.pathways.show,color.use = c("Myo"="#E69F00", "Vasc" = "#D55E00","Blood"= "#F0E442","Endo"= "#CC79A7", "UtEp"="#0072B2", "Ist"= "#D2B48C", "IntTroph"= "#00FFFF", "Areola"="#FF00FF"), layout = "chord")
+dev.off()
+ 
+
+DefaultAssay(VV) <- "alra"
+Spatial_IL6_17 <- SpatialFeaturePlot(VV, images = "MFI017", features = c("IL6", "IL6R"), pt.size.factor = 1.6, ncol = 5, crop = FALSE, alpha = 1, min.cutoff = "q1", max.cutoff = "q99")
+ggsave(filename = "Spatial_IL6_17.pdf", plot = Spatial_IL6_17, height = 8, width = 16, units = "in")
+
+DefaultAssay(VV) <- "alra"
+Spatial_HSPG_17 <- SpatialFeaturePlot(VV, images = "MFI017", features = c("HSPG2","DAG1"), pt.size.factor = 1.6, ncol = 5, crop = FALSE, alpha = 1, min.cutoff = "q1", max.cutoff = "q99")
+ggsave(filename = "Spatial_HSPG_17.pdf", plot = Spatial_HSPG_17, height = 8, width = 16, units = "in")
+
+DefaultAssay(VV) <- "alra"
+Spatial_MK_17 <- SpatialFeaturePlot(VV, images = "MFI017", features = c("MDK","SDC2"), pt.size.factor = 1.6, ncol = 5, crop = FALSE, alpha = 1, min.cutoff = "q1", max.cutoff = "q99")
+ggsave(filename = "Spatial_MDK_17.pdf", plot = Spatial_HSPG_17, height = 8, width = 16, units = "in")
+
+```
+
+```{r}
+#TROPHOBLASTS ONLY CELLCHAT ANALYSIS
+#VISIUM TROPHOBLASTS ONLY
+VV <- readRDS("Visium_labeled_Final_6-18-24.rds")
+
+cluster.ids <- c("Myo",
+                 "Myo",
+                 "Vasc",
+                 "Blood",
+                 "Endo",
+                 "UtEp", "Ist", "IntTroph", "Areola", "Areola")
+
+names(cluster.ids) <- levels(VV)
+Spatial2 <- RenameIdents(VV, cluster.ids)
+print(levels(Spatial2))
+
+Visium_tro_only_1 <- subset(Spatial2, idents = c("IntTroph","Areola"))
+VVCellchat_alra <- createCellChat(object = Visium_tro_only_1, assay = "alra")
+
+CellChatDB.use <- CellChatDB
+VVCellchat_alra@DB <- CellChatDB.use
+VVCellchat_alra <- subsetData(VVCellchat_alra)
+VVCellchat_alra <- identifyOverExpressedGenes(VVCellchat_alra)
+VVCellchat_alra <- identifyOverExpressedInteractions(VVCellchat_alra)
+VVCellchat_alra <- smoothData(VVCellchat_alra, adj = PPI.human)
+VVCellchat_alra <- computeCommunProb(VVCellchat_alra, raw.use = TRUE)
+VVCellchat_alra <- filterCommunication(VVCellchat_alra, min.cells = 1)
+VVCellchat_alra <- computeCommunProbPathway(VVCellchat_alra)
+VVCellchat_alra <- aggregateNet(VVCellchat_alra)
+
+VVCellchat_alra <- netAnalysis_computeCentrality(VVCellchat_alra, slot.name = "netP")
+VVCellchat_alra@netP[["pathways"]] 
+
+
+
+#STO CELL CHAT INTTROPH AND AREOLA ONLY
+STO <- readRDS("STO_labeled_8-29-24.rds")
+STO_sub <- subset(STO, idents = c("(C0) IntTroph", "(C1) Areola-2", "(C3) Areola-3", "(C4) Areola-1"))
+
+cluster.ids.2 <- c("IntTroph",
+                 "Areola",
+                 "Areola",
+                 "Areola")
+
+names(cluster.ids.2) <- levels(STO_sub)
+STO2 <- RenameIdents(STO_sub, cluster.ids.2)
+print(levels(STO2))
+
+STO_tro_alra <- createCellChat(object = STO2, group.by = "ident", assay = "alra")
+
+CellChatDB.use <- CellChatDB
+STO_tro_alra@DB <- CellChatDB.use
+STO_tro_alra <- subsetData(STO_tro_alra)
+STO_tro_alra <- identifyOverExpressedGenes(STO_tro_alra)
+STO_tro_alra <- identifyOverExpressedInteractions(STO_tro_alra)
+STO_tro_alra <- smoothData(STO_tro_alra, adj = PPI.human)
+STO_tro_alra <- computeCommunProb(STO_tro_alra, raw.use = TRUE)
+STO_tro_alra <- filterCommunication(STO_tro_alra, min.cells = 1)
+STO_tro_alra <- computeCommunProbPathway(STO_tro_alra)
+STO_tro_alra <- aggregateNet(STO_tro_alra)
+
+STO_tro_alra <- netAnalysis_computeCentrality(STO_tro_alra, slot.name = "netP")
+STO_tro_alra@netP[["pathways"]] 
+VVCellchat_alra@netP[["pathways"]] 
+
+```
+
+
+```{r}
+library(NMF)
+selectK(STO_tro_alra, pattern = "outgoing")
+selectK(STO_tro_alra, pattern = "incoming")
+
+ par(mfrow=c(1,1))
+pdf(file ="patternsSTOtroouttall.pdf", width = 5, height =25)
+nPatterns = 2
+ identifyCommunicationPatterns(STO_tro_alra, pattern = "outgoing", k = nPatterns, color.heatmap="RdBu", width = 3, height=25)
+ dev.off()
+ 
+  par(mfrow=c(1,1))
+pdf(file ="patternsSTOtrooutshort.pdf", width = 8, height =8)
+nPatterns = 2
+ identifyCommunicationPatterns(STO_tro_alra, pattern = "outgoing", k = nPatterns, color.heatmap="RdBu", width = 3, height=3)
+ dev.off()
+ 
+  par(mfrow=c(1,1))
+pdf(file ="patternsSTOtroinshort.pdf", width = 8, height =8)
+nPatterns = 2
+identifyCommunicationPatterns(STO_tro_alra, pattern = "incoming", k = nPatterns, color.heatmap="RdBu", width = 3, height=3)
+dev.off()
+
+  par(mfrow=c(1,1))
+pdf(file ="patternsSTOtrointall.pdf", width = 5, height =25)
+nPatterns = 2
+identifyCommunicationPatterns(STO_tro_alra, pattern = "incoming", k = nPatterns, color.heatmap="RdBu", width = 3, height=25)
+dev.off()
+
+
+
+
+selectK(VVCellchat_alra, pattern = "outgoing")
+selectK(VVCellchat_alra, pattern = "incoming")
+
+ par(mfrow=c(1,1))
+pdf(file ="patternsVisiumtroouttall.pdf", width = 5, height =25)
+nPatterns = 2
+ identifyCommunicationPatterns(VVCellchat_alra, pattern = "outgoing", k = nPatterns, color.heatmap="RdBu", width = 3, height=25)
+ dev.off()
+ 
+  par(mfrow=c(1,1))
+pdf(file ="patternsVisiumtrooutshort.pdf", width = 8, height =8)
+nPatterns = 2
+ identifyCommunicationPatterns(VVCellchat_alra, pattern = "outgoing", k = nPatterns, color.heatmap="RdBu", width = 3, height=3)
+ dev.off()
+ 
+  par(mfrow=c(1,1))
+pdf(file ="patternsVisiumtroinshort.pdf", width = 8, height =8)
+nPatterns = 2
+identifyCommunicationPatterns(VVCellchat_alra, pattern = "incoming", k = nPatterns, color.heatmap="RdBu", width = 3, height=3)
+dev.off()
+
+  par(mfrow=c(1,1))
+pdf(file ="patternsVisiumtrointall.pdf", width = 5, height =25)
+nPatterns = 2
+identifyCommunicationPatterns(VVCellchat_alra, pattern = "incoming", k = nPatterns, color.heatmap="RdBu", width = 3, height=25)
+dev.off()
+```
+
+```{r}
+ par(mfrow=c(1,1))
+pdf(file ="netvisualheatmapstotro.pdf", width = 10, height =5)
+netVisual_heatmap(STO_tro_alra, color.use=c("IntTroph"="#E69F00", "Areola" = "#0072b2"), font.size = 12, cluster.rows = TRUE, cluster.cols = T)+
+  netVisual_heatmap(STO_tro_alra, measure = "weight", color.use=c("IntTroph"="#E69F00", "Areola" = "#0072b2"), font.size = 12, cluster.rows = TRUE, cluster.cols = T)
+dev.off()
+
+ par(mfrow=c(1,1))
+pdf(file ="netvisualheatmapvisiumtro.pdf", width = 10, height =5)
+netVisual_heatmap(VVCellchat_alra, color.use=c("IntTroph"="#E69F00", "Areola" = "#0072b2"), font.size = 12, cluster.rows = TRUE, cluster.cols = T)+
+  netVisual_heatmap(VVCellchat_alra, measure = "weight", color.use=c("IntTroph"="#E69F00", "Areola" = "#0072b2"), font.size = 12, cluster.rows = TRUE, cluster.cols = T)
+dev.off()
+
+
+
+ par(mfrow=c(1,1))
+pdf(file ="netvisualcirclesstotrocount.pdf", width = 10, height =5)
+netVisual_circle(STO_tro_alra@net$count, weight.scale = T, label.edge= F, title.name = "Number of interactions")
+dev.off()
+
+ par(mfrow=c(1,1))
+pdf(file ="netvisualcirclesstotrostrength.pdf", width = 10, height =5)
+netVisual_circle(STO_tro_alra@net$weight, weight.scale = T, label.edge= F, title.name = "Interaction weights/strength")
+dev.off()
+
+ par(mfrow=c(1,1))
+pdf(file ="netvisualcirclesvisiumtrocount.pdf", width = 10, height =5)
+netVisual_circle(VVCellchat_alra@net$count, weight.scale = T, label.edge= F, title.name = "Number of interactions")
+dev.off()
+
+ par(mfrow=c(1,1))
+pdf(file ="netvisualcirclesvisiumtrostrength.pdf", width = 10, height =5)
+netVisual_circle(VVCellchat_alra@net$weight, weight.scale = T, label.edge= F, title.name = "Interaction weights/strength")
+dev.off()
+```
+
+```{r}
+#PLOTS FOR PATHWAYS OF INTEREST
+
+CDH.pathways.show <- c("CDH")
+ANGPTL.pathways.show <- c("ANGPTL")
+AGRN.pathways.show <- c("AGRN")
+
+
+par(mfrow=c(1,1))
+pdf(file ="AGRN_sto_tro.pdf", width = 20, height =16)
+netVisual_aggregate(STO_tro_alra, signaling = AGRN.pathways.show, layout = "chord", color.use=c("IntTroph"="#E69F00", "Areola" = "#0072b2"))
+dev.off()
+
+par(mfrow=c(1,1))
+pdf(file ="AGRN_visium_tro.pdf", width = 20, height =16)
+netVisual_aggregate(VVCellchat_alra, signaling = AGRN.pathways.show, layout = "chord", color.use=c("IntTroph"="#E69F00", "Areola" = "#0072b2"))
+dev.off()
+
+par(mfrow=c(1,1))
+pdf(file ="ANGPTL_sto_tro.pdf", width = 20, height =16)
+netVisual_aggregate(STO_tro_alra, signaling = ANGPTL.pathways.show, layout = "chord", color.use=c("IntTroph"="#E69F00", "Areola" = "#0072b2"))
+dev.off()
+
+par(mfrow=c(1,1))
+pdf(file ="ANGPTL_visium_tro.pdf", width = 20, height =16)
+netVisual_aggregate(VVCellchat_alra, signaling = ANGPTL.pathways.show, layout = "chord", color.use=c("IntTroph"="#E69F00", "Areola" = "#0072b2"))
+dev.off()
+
+par(mfrow=c(1,1))
+pdf(file ="CDH_sto_tro.pdf", width = 20, height =16)
+netVisual_aggregate(STO_tro_alra, signaling = CDH.pathways.show, layout = "chord", color.use=c("IntTroph"="#E69F00", "Areola" = "#0072b2"))
+dev.off()
+
+par(mfrow=c(1,1))
+pdf(file ="CDH_visium_tro.pdf", width = 20, height =16)
+netVisual_aggregate(VVCellchat_alra, signaling = CDH.pathways.show, layout = "chord", color.use=c("IntTroph"="#E69F00", "Areola" = "#0072b2"))
+dev.off()
+
+
+
+plotGeneExpression(VVCellchat_alra, signaling = ANGPTL.pathways.show, enriched.only = TRUE)
+plotGeneExpression(STO_tro_alra, signaling = ANGPTL.pathways.show, enriched.only = TRUE)
+
+dotplot_genes_ANGPTL <- c("ANGPTL1","ANGPTL2", "ANGPTL4", "CDH11", "SDC1", "SDC2", "SDC3", "ITGA1","ITGA5", "ITGAV", "ITGB1", "ITGB3")
+dotplot_markers_ANGPTL <- DotPlot(object = Visium_tro_only_1, features = dotplot_genes_ANGPTL, assay = "alra", scale = FALSE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  coord_flip()+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+dotplot_markers_ANGPTL_sTO <- DotPlot(object = STO2, features = dotplot_genes_ANGPTL, assay = "alra", scale = FALSE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  coord_flip()+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+ggsave(plot = dotplot_markers_ANGPTL, "dotplot_markers_spatial_ANGPTL.pdf", height = 3.5, width = 4)
+
+ggsave(plot = dotplot_markers_ANGPTL_sTO, "dotplot_markers_sTO_ANGPTL.pdf", height = 3.5, width = 4)
+
+
+plotGeneExpression(VVCellchat_alra, signaling = CDH.pathways.show, enriched.only = TRUE)
+plotGeneExpression(STO_tro_alra, signaling = CDH.pathways.show, enriched.only = TRUE)
+
+dotplot_genes_CDH <- c("CDH1","CDH4")
+dotplot_markers_CDH <- DotPlot(object = Visium_tro_only_1, features = dotplot_genes_CDH, assay = "alra", scale = FALSE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  coord_flip()+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+dotplot_markers_CDH_sTO <- DotPlot(object = STO2, features = dotplot_genes_CDH, assay = "alra", scale = FALSE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  coord_flip()+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+ggsave(plot = dotplot_markers_CDH, "dotplot_markers_spatial_CDH.pdf", height = 2, width = 4)
+
+ggsave(plot = dotplot_markers_CDH_sTO, "dotplot_markers_sTO_CDH.pdf", height = 2, width = 4)
+
+
+
+
+plotGeneExpression(VVCellchat_alra, signaling = CDH.pathways.show, enriched.only = TRUE)
+plotGeneExpression(STO_tro_alra, signaling = CDH.pathways.show, enriched.only = TRUE)
+
+dotplot_genes_AGRN <- c("AGRN","DAG1")
+dotplot_markers_AGRN <- DotPlot(object = Visium_tro_only_1, features = dotplot_genes_AGRN, assay = "alra", scale = FALSE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  coord_flip()+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+dotplot_markers_AGRN_sTO <- DotPlot(object = STO2, features = dotplot_genes_AGRN, assay = "alra", scale = FALSE)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  coord_flip()+
+  scale_colour_gradient2(low = "darkblue", mid = "white", high = "darkred")
+
+ggsave(plot = dotplot_markers_AGRN, "dotplot_markers_spatial_AGRN.pdf", height = 2, width = 4)
+
+ggsave(plot = dotplot_markers_AGRN_sTO, "dotplot_markers_sTO_AGRN.pdf", height = 2, width = 4)
+```
+
+
+
+
+
+
+
+
+
