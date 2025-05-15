@@ -1,2 +1,5 @@
 This repository contains the code used to analyze Visium Spatial Transcriptomics and single cell RNA sequencing of the porcine maternal-fetal interface and swine trophoblast organoids (sTO) respectively. Data used in this script is from the manuscript "Defining Cellular Diversity at the Swine Maternal-Fetal Interface Using Spatial Transcriptomics and Organoids". This manuscript was originally posted to bioRxiv under the DOI: https://doi.org/10.1101/2024.10.21.619461
-Data is avaliable via SRA Bioproject PRJNA1252046
+Data is avaliable via SRA Bioproject PRJNA1252046.
+
+Explore the dataset via our interactive Shiny interface:
+👉 https://coynelab.shinyapps.io/myshinyapp/
