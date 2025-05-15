@@ -1,0 +1,250 @@
+---
+title: "sTO Slingshot"
+output: html_document
+date: "2025-05-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+DefaultAssay(STO)  <- "integrated"
+STO.sce <- as.SingleCellExperiment(STO)
+STO.sce1 <- slingshot(STO.sce, clusterLabels = 'ident', reducedDim = "UMAP", start.clus = "(C2) ProfTroph", allow.breaks = FALSE)
+```
+
+```{r}
+slo <- SlingshotDataSet(STO.sce1)
+slo
+```
+
+```{r}
+Curves <- slingCurves(STO.sce1)
+Curve1XY <- data.frame(X = Curves$Lineage1$s[,1], Y = Curves$Lineage1$s[,2])
+Curve2XY <- data.frame(X = Curves$Lineage2$s[,1], Y = Curves$Lineage2$s[,2])
+STO$pseudotime1 <- STO.sce1$slingPseudotime_1
+STO$pseudotime2 <- STO.sce1$slingPseudotime_2
+```
+
+```{r}
+inverted_colors <- rev(colorRampPalette(brewer.pal(11, 'Spectral')[-6])(100))
+```
+
+```{r}
+FeaturePlot(STO, features = "pseudotime1", pt.size = 1, cols = inverted_colors) +
+    geom_path(data = Curve1XY, aes(x = X, y = Y), size = 1, linetype = "dashed", 
+              arrow = arrow(type = "closed", length = unit(0.2, "inches")))
+
+FeaturePlot(STO, features = "pseudotime2", pt.size = 1, cols = inverted_colors) +
+    geom_path(data = Curve2XY, aes(x = X, y = Y), size = 1, linetype = "dashed", 
+              arrow = arrow(type = "closed", length = unit(0.2, "inches")))
+```
+
+
+```{r}
+counts <- as.matrix(STO@assays$RNA@counts)
+filt_counts <- counts[rowSums(counts > 5) > ncol(counts)/100, ]
+BPPARAM <- BiocParallel::bpparam()
+BPPARAM$workers <- 7
+sce <- fitGAM(filt_counts,
+                sds=slo3,
+                nknots = 4, sce = TRUE, verbose=TRUE)
+```
+
+```{r}
+assoRes_STO <- associationTest(sce, lineages = TRUE)
+write.csv(assoRes_STO, file="assoRes_STO.csv")
+```
+
+```{r}
+p.adjusted <- p.adjust(assoRes_STO$pvalue, method = "fdr")
+assoRes_STO$adjustedPValue <- p.adjusted
+significantGenes <- assoRes_STO[which(assoRes_STO$adjustedPValue < 0.05), ]
+write.csv(significantGenes, file="assoRes_STO.significantGenes.csv")
+```
+
+
+***Export direction***
+```{r}
+library(dplyr)
+
+# Assuming you have the 'waldstat' in the 'sce' object
+waldstat_df <- as.data.frame(rowData(sce)$waldStat) %>%
+    rownames_to_column("gene")
+
+smoothers <- predictSmooth(sce, gene = rownames(sce), nPoints = 100)
+direction_df <- smoothers %>%
+    group_by(gene, lineage) %>%
+    arrange(time) %>%
+    summarize(direction = case_when(
+        all(diff(yhat) > 0) ~ "increasing",
+        all(diff(yhat) < 0) ~ "decreasing",
+        TRUE ~ "mixed"
+    )) %>%
+    ungroup()
+
+# Join direction_df with waldstat_df
+output_df <- direction_df %>%
+    left_join(waldstat_df, by = "gene")
+
+# Write the output to a file
+write.csv(output_df, "output_file.csv", row.names = FALSE)
+
+```
+
+```{r}
+increasing_genes <- direction_df %>% filter(direction == "increasing")
+decreasing_genes <- direction_df %>% filter(direction == "decreasing")
+write.csv(increasing_genes, "increasing_genes.STO.csv", row.names = FALSE)
+write.csv(decreasing_genes, "decreasing_genes.STO.csv", row.names = FALSE)
+```
+
+**heatmap of all***
+```{r}
+startRes <- startVsEndTest(sce,l2fc = log2(1))
+```
+
+```{r}
+order <- order(startRes$waldStat, decreasing = TRUE)
+startRes200 <- names(sce)[order[1:250]]
+logcounts_matrix <- assays(STO.sce3)$logcounts
+setdiff(startRes200, rownames(logcounts_matrix))
+valid_startRes200 <- startRes200[startRes200 %in% rownames(logcounts_matrix)]
+specific_logcounts <- logcounts_matrix[valid_startRes200, ]
+specific_logcounts_matrix <- as.matrix(specific_logcounts)
+to_plot <- specific_logcounts_matrix
+ptime <- STO.sce3$slingPseudotime_1
+ptime_order <- colnames(to_plot)[order(ptime)]
+lineage_cells <- colnames(STO.sce3)[!is.na(ptime)]
+
+
+annotations <- colData(STO.sce)[lineage_cells, 
+                            c("slingPseudotime_1", 
+                              "ident")] %>% 
+    as.data.frame()
+
+cluster_colorsSTO<-c("(C0) IntTroph" = "#A6CEE3", "(C1) Areola-2" = "#FF7F00", "(C2) ProfTroph" = "#4DAF4A", "(C3) Areola-3" = "#984EA3", "(C4) Areola-1" = "#A65628")
+
+ha <- HeatmapAnnotation(df = annotations, col=list(ident=c("(C0) IntTroph" = "#A6CEE3", "(C1) Areola-2" = "#FF7F00", "(C2) ProfTroph" = "#4DAF4A", "(C3) Areola-3" = "#984EA3", "(C4) Areola-1" = "#A65628"), show_legend = TRUE))
+```
+
+***Heatmap of both trajectories***
+```{r}
+ptime <- slingPseudotime(STO.sce3)
+avg_ptime <- rowMeans(ptime, na.rm = TRUE)
+column_annotations <- data.frame(pseudotime = avg_ptime)
+cluster_identities <- STO.sce3$ident
+column_annotations <- data.frame(
+    pseudotime = avg_ptime,
+    ident = cluster_identities
+)
+specific_colors <- list(
+    pseudotime = colorRamp2(c(min(avg_ptime), max(avg_ptime)), c("blue", "red")),
+    ident = c(
+        "(C0) IntTroph" = "#A6CEE3", 
+        "(C1) Areola-2" = "#FF7F00", 
+        "(C2) ProfTroph" = "#4DAF4A", 
+        "(C3) Areola-3" = "#984EA3", 
+        "(C4) Areola-1" = "#A65628"
+    )
+)
+
+ha <- HeatmapAnnotation(df = column_annotations, col = specific_colors)
+```
+
+
+```{r}
+library(colorRamp2)
+Heatmap(to_plot,
+        column_order = order(avg_ptime),  # Sort columns by pseudotime
+        show_column_names = FALSE,
+        show_row_names = TRUE, 
+        row_names_gp = gpar(fontsize = 7),
+        top_annotation = ha, 
+        na_col = "#0505A6",  
+        use_raster = TRUE, 
+        raster_by_magick = TRUE, 
+        raster_magick_filter = "Bessel", 
+        col = colorRamp2(c(0, 0.5, 0.75, 1, 1.5, 2, 2.5), 
+                         c("#0505A6",  "#00FFFF", "#02F002","#ADFF2F", "#FFFF00","#FFA500", "#FF0000"))
+)
+
+```
+
+***Heatmap of single trajectories***
+
+```{r}
+traj1 <- read.csv("traj1.csv")
+index_order <- order(traj1$waldStat, decreasing = TRUE)
+traj1 <- traj1[index_order, ]
+top_500_genes <- head(traj1$gene, 500)
+logcounts_matrix <- assays(STO.sce3)$logcounts
+missing_genes <- setdiff(top_500_genes, rownames(logcounts_matrix))
+length(missing_genes) # This will tell you how many genes are missing
+missing_genes
+valid_genes <- intersect(top_500_genes, rownames(logcounts_matrix))
+specific_logcounts <- logcounts_matrix[valid_genes, ]
+specific_logcounts_matrix <- as.matrix(specific_logcounts)
+```
+
+```{r}
+to_plot <- specific_logcounts_matrix
+ptime <- STO.sce3$slingPseudotime_1
+ptime_order <- colnames(to_plot)[order(ptime)]
+lineage_cells <- colnames(STO.sce3)[!is.na(ptime)]
+```
+
+
+```{r}
+specific_colors <- list(
+    pseudotime = colorRamp2(c(min(avg_ptime), max(avg_ptime)), c("white", "#FF007F")),
+    ident = c(
+        "(C0) IntTroph" = "#A6CEE3", 
+        "(C1) Areola-2" = "#FF7F00", 
+        "(C2) ProfTroph" = "#4DAF4A", 
+        "(C3) Areola-3" = "#984EA3", 
+        "(C4) Areola-1" = "#A65628"
+    ))
+
+ha <- HeatmapAnnotation(df = column_annotations, col = specific_colors)
+```
+
+```{r}
+Heatmap(to_plot,
+        column_order = order(avg_ptime),  # Sort columns by pseudotime
+        show_column_names = FALSE,
+        show_row_names = TRUE, 
+        row_names_gp = gpar(fontsize = 3),
+        top_annotation = ha, 
+        na_col = "#0505A6",  
+        use_raster = TRUE, 
+        raster_by_magick = TRUE, 
+        raster_magick_filter = "Bessel", 
+        col = colorRamp2(c(0, 0.5, 0.75, 1, 1.5, 2, 2.5), 
+                         c("#0505A6",  "#00FFFF", "#02F002","#ADFF2F", "#FFFF00","#FFA500", "#FF0000"))
+)
+```
+
+
+```{r}
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
