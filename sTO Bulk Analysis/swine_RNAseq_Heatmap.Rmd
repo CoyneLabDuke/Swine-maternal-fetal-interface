@@ -1,0 +1,75 @@
+---
+title: "DO_RNAseq_Heatmap"
+output: html_document
+date: "2022-12-19"
+---
+
+```{r}
+library(tidyverse)
+library(magrittr)
+install.packages("pheatmap")
+library(pheatmap)
+library(RColorBrewer)
+install.packages("rio")
+library(rio)
+
+```
+
+```{r}
+#heatmap analysis
+df <- read_csv("Remapped_bulk_RPKM_hm.csv")
+df
+
+key2 <- read_csv("gene_key_short.csv")
+
+df2 <- df %>% 
+  inner_join(key2)
+write.csv(df2, "df2.csv")
+
+Swine_table2 <- read.table("df2.txt", sep="\t",header=T, row.names=1)
+Swine_matrix2<-as.matrix(Swine_table2)
+Swine_log_df2 <- log2(Swine_matrix2 + 1)
+Swine_hm <- pheatmap(Swine_log_df2, color = hcl.colors(50, "Blue-Red 3") , scale = "row",show_rownames = T, cluster_rows = T, cluster_cols = T, treeheight_row = 0, treeheight_col = 10, cutree_rows = NA, cutree_cols = NA)
+
+ggsave("heatmap.pdf", plot = Swine_hm, width = 9, height = 8)
+
+```
+
+```{r}
+#Sex Determination Analysis
+
+keyY <- read_csv("sex_2.csv")
+ dfY <- df %>% 
+  inner_join(keyY)
+
+
+sexY_df <- dfY %>% 
+  gather(sample, RPKM, 2:21)
+
+sexY_1 <- sexy_df %>% group_by(sample) %>% 
+  summarise(RPKM_sum=sum(RPKM),
+            .groups = 'drop')
+
+
+sexY_df_2 <- sexy_1 %>% separate(sample, into = c("line", "replicate"), sep = "_")
+
+filter_list <- c("sTO01", "sTO02", "sTO03")
+filtered <- sexY_df_2 %>% 
+  filter(line %in% filter_list)
+  
+
+plotsex_sum <- filtered %>% 
+  ggplot(aes(x = line, y = RPKM_sum, fill = line, color = line, position = 'fill'))+
+    geom_bar(stat="summary", fun.y="mean")+
+  geom_point(position = position_jitterdodge(), alpha = 1.0, size = 3, col = "black") +
+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=0.5), legend.position = "none")+
+  xlab("")+
+  theme_bw()
+
+ggsave(plot = plotsex_sum, "sex_sum.pdf")
+
+
+```
+
+
